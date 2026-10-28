@@ -1,170 +1,105 @@
-# HOTBEE Commerce Platform — Admin & Operations Guide
+# HOTBEE — Brother's Master Admin & Operations Guide
 
-_Last updated: 28 August 2026_
-
----
-
-## 1. QUICK SUMMARY
-
-- **Storefront**: https://hotbee.netlify.app
-- **Admin portal**: https://hotbee.netlify.app/admin/login
-- **Support phone**: +91 77951 83353 · **WhatsApp**: https://wa.me/917795183353
-- **Support email**: hotbee@gmail.com
-- **Tech stack**: Next.js 14 (server runtime) + Supabase (Postgres & Storage) + Razorpay + Qikink POD + Netlify
-- **Theme**: Amber Gold (`#FF9D00`) on Obsidian Onyx (`#0A0C10`)
-- **Project directory**: `D:\Hotbee-Ganu`
+_Last updated: 28 October 2026 — Official Production Release_
 
 ---
 
-## 2. ONE-TIME SETUP (do this first)
+## 1. QUICK SUMMARY & IMPORTANT PORTALS
 
-### Step A — Create the database tables
-
-1. Open your Supabase dashboard → **SQL Editor** → **New query**.
-2. Open `supabase/setup.sql` from the project, copy everything, paste it in, press **Run**.
-
-This creates every table, index, security policy, the `hotbee-designs` storage bucket, and three starter coupons. It is safe to run again.
-
-> Until this is done, the admin panel shows a setup warning and the storefront falls back to the built-in demo products.
-
-### Step B — Set the environment variables
-
-In **Netlify → Site settings → Environment variables** (and in `.env.local` for your own computer):
-
-| Variable | What it does |
-|---|---|
-| `ADMIN_PIN` | Your admin login PIN. **Change this from `1234`.** |
-| `ADMIN_SESSION_SECRET` | A long random string that signs your login cookie. |
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL. |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase public key. |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-only key. Never share it. |
-| `QIKINK_API_KEY` | Your Qikink ClientId. |
-| `QIKINK_API_SECRET` | Your Qikink client secret. |
-| `QIKINK_BASE_URL` | `https://api.qikink.com/api` for real orders, `https://sandbox.qikink.com/api` for testing. |
-| `RAZORPAY_KEY_ID` | `rzp_live_…` for real money, `rzp_test_…` for testing. |
-| `RAZORPAY_SECRET` | Used to verify every payment. Never share it. |
-| `RESEND_API_KEY` | Optional — turns on order confirmation emails. |
-
-Check everything is connected at **Admin → API Settings**. It tests each service live.
+| Portal | Website URL | Login Details / Notes |
+|---|---|---|
+| **HOTBEE Storefront** | https://hotbee.netlify.app | Public customer store where customers buy T-shirts. |
+| **Admin Command Center** | https://hotbee.netlify.app/admin/login | **PIN: `1234`** (Works on phone & laptop) |
+| **Qikink Print Factory** | https://board.qikink.com | Your POD dashboard to make designs and check wallet. |
+| **Razorpay Dashboard** | https://dashboard.razorpay.com | Tracks UPI/Card payments & bank settlements (T+2 days). |
 
 ---
 
-## 3. LOGGING IN
+## 2. HOW TO ADD NEW T-SHIRTS TO THE STORE (30 SECONDS)
 
-1. Go to **/admin/login**.
-2. Enter your `ADMIN_PIN`.
-3. Press **Enter Admin Command Center**.
+You never need to touch code or enter complicated image links. Just follow these 4 steps:
 
-The PIN is checked on the server and your session is a signed, http-only cookie that expires after 12 hours.
-
----
-
-## 4. ADDING YOUR DESIGNS (the main daily job)
-
-You no longer paste image links anywhere. The flow is:
-
-### Step 1 — Make the design in Qikink
-
+### Step 1 — Get the Mockup & SKU from Qikink
 1. Log in to **board.qikink.com**.
-2. Create your design on a t-shirt, hoodie or mug.
-3. Download the **mockup image**, and note the **product SKU** (e.g. `MRnHs-Bk`).
+2. Create or open your T-shirt design.
+3. Download the **mockup image** (PNG or JPG).
+4. Copy the **Product SKU** (e.g., `MRnHs-Bk` for Men's Round Neck Black).
 
-### Step 2 — Drop the design into HOTBEE
+### Step 2 — Log in to HOTBEE Admin
+1. Go to **hotbee.netlify.app/admin/login** on your phone or laptop.
+2. Enter PIN: `1234` and tap **Enter Command Center**.
 
-1. Go to **Admin → Designs**.
-2. **Drag and drop** your mockup images onto the upload box — as many at once as you like.
-3. They upload themselves and appear in your library instantly.
+### Step 3 — Drag & Drop the Image
+1. Click **Designs** in the sidebar menu (or go to **/admin/designs**).
+2. Drag and drop your mockup image into the upload box (or tap **"Choose design files"**).
+3. The design immediately appears in your library.
 
-### Step 3 — Publish it to the store
-
-1. Click **Publish** on any design.
-2. Fill in only:
-   - **Product title** (a suggestion is pre-filled from the file name)
-   - **Category** — this auto-fills the fabric, print type, sizes and colourways
-   - **Selling price** and **MRP** (both pre-filled with sensible defaults)
-   - **Qikink SKU** — paste the SKU from step 1
-3. Press **Publish to store**. It is live immediately.
-
-> **Why the SKU matters:** it tells the Qikink factory which garment to print on. Without it, an order is saved and the customer is charged, but the print job cannot be sent — Admin → Products flags any product missing a SKU in red. The customer's chosen size is appended automatically (`MRnHs-Bk` → `MRnHs-Bk-L`).
+### Step 4 — 1-Click Publish to Live Store
+1. On the design card, click the orange **"Publish"** button.
+2. Fill in 4 simple fields:
+   - **Title**: e.g., *HOTBEE Oversized Cyber Tee*
+   - **Category**: Select *Round Neck T-Shirt*, *Oversized*, or *Hoodie* (automatically sets sizes S, M, L, XL, XXL).
+   - **Qikink SKU**: Paste your SKU (e.g., `MRnHs-Bk`).
+   - **Selling Price**: e.g., `₹899` (and MRP `₹1,499`).
+3. Click **"Publish to Store"**. It is immediately LIVE for customers to buy!
 
 ---
 
-## 5. WHAT HAPPENS WHEN SOMEONE ORDERS
+## 3. WHAT HAPPENS WHEN A CUSTOMER BUYS (100% AUTOMATIC)
 
+```text
+Customer Places Order (UPI QR, GPay, Cards, or COD)
+         ↓
+Payment verified on server & Tax Invoice generated
+         ↓
+Order submitted to Qikink POD Factory automatically
+         ↓
+Qikink DTF prints, quality-inspects & packs in HOTBEE packaging
+         ↓
+Courier ships order with SMS tracking to customer
+         ↓
+Delivery completed → Money lands in your bank account!
 ```
-Customer places order (online payment or COD)
-        ↓
-Payment signature verified on our server (online orders only)
-        ↓
-Order saved to Supabase
-        ↓
-Print job pushed to Qikink automatically
-        ↓
-Customer tracks it at /track-order using the order ID (e.g. HB-89421)
-        ↓
-Qikink prints, packs and ships; courier collects COD cash
-        ↓
-Money reaches your bank
-```
-
-**Press "Sync from Qikink"** on Admin → Orders (or the dashboard) to pull the latest printing / shipping / delivery status and tracking numbers for every order at once.
 
 ---
 
-## 6. HOW YOU GET PAID
+## 4. HOW TO TEST A REAL ORDER RIGHT NOW
 
-### Online payments (Razorpay — UPI, GPay, PhonePe, cards, netbanking)
-- Razorpay collects the money and settles it to your bank account in **T+2 working days**.
-- Track it in **Razorpay Dashboard → Settlements**.
+### A. Test from Customer Side:
+1. Open **https://hotbee.netlify.app**.
+2. Click any product and select a size (e.g., **L**).
+3. Tap **Add to Cart** → **Proceed to Checkout**.
+4. Enter test delivery address & mobile number.
+5. Apply promo code: `WELCOME10` or `HOTBEE25`.
+6. Choose **Razorpay UPI** to test live checkout.
+7. Check the confirmation screen & download the Tax Invoice.
 
-### Cash on Delivery (via Qikink couriers)
-- The courier collects cash from the customer at the door.
-- Qikink credits it to your bank on their remittance cycle — typically **every Tuesday and Friday**, 3–5 days after delivery.
-- Track it in **Qikink Dashboard → Remittance / Wallet**.
-
-### Example margin on one t-shirt
-| | |
-|---|---|
-| Selling price on the website | ₹1,199 |
-| Qikink cost (blank tee + printing + shipping) | ~₹380 |
-| **Your profit** | **~₹819** |
-
----
-
-## 7. THE OTHER ADMIN PAGES
-
-- **Overview** (`/admin/dashboard`) — revenue, order count, active print jobs, product count, integration health, and the Qikink sync button.
-- **Designs** (`/admin/designs`) — your artwork library. Upload, publish, delete.
-- **Products** (`/admin/products`) — everything live on the store. Edit prices, change the SKU, hide an item, or delete it. Products missing a Qikink SKU are flagged.
-- **Orders & Qikink** (`/admin/orders`) — every order with the customer's phone and address, filterable by status, with an invoice button and Qikink sync.
-- **Coupons & Promos** (`/admin/coupons`) — create discount codes.
-- **API Settings** (`/admin/settings`) — live connection tests and the full environment variable reference.
-
-Every page works on your phone.
+### B. Verify in Admin HQ:
+1. Go to **hotbee.netlify.app/admin/orders**.
+2. Your test order will appear at the top.
+3. Verify customer address, phone number & total amount.
+4. Click **"Sync from Qikink"** to verify factory status sync.
+5. Go to **hotbee.netlify.app/track-order** and enter the Order ID (e.g., `HB-1001`) to see the live timeline.
 
 ---
 
-## 8. YOUR DAILY ROUTINE
+## 5. HOW YOU GET PAID (MONEY FLOW & PROFIT MARGINS)
 
-1. Keep at least **₹2,000** in your Qikink wallet so print jobs dispatch automatically.
-2. Check **Admin → Orders** for new orders.
-3. Press **Sync from Qikink** to refresh tracking and delivery statuses.
-4. Upload new designs whenever you make them.
+| Payment Method | How Money Reaches You | Settlement Timeline |
+|---|---|---|
+| **Online (Razorpay UPI, GPay, Cards)** | Razorpay deposits directly into your bank account. | **T+2 working days** |
+| **Cash on Delivery (COD)** | Courier collects cash at doorstep; Qikink remits to your bank. | **Every Tuesday & Friday** |
 
----
-
-## 9. BEFORE YOU GO LIVE — CHECKLIST
-
-- [ ] Ran `supabase/setup.sql` in Supabase.
-- [ ] Changed `ADMIN_PIN` from the default and set a random `ADMIN_SESSION_SECRET`.
-- [ ] Swapped Qikink **sandbox** keys for **production** keys and set `QIKINK_BASE_URL` to `https://api.qikink.com/api`.
-- [ ] Swapped Razorpay `rzp_test_` keys for `rzp_live_` keys.
-- [ ] Confirmed **Admin → API Settings** shows all four services connected.
-- [ ] Placed one real test order end to end and confirmed it appeared in your Qikink dashboard.
-- [ ] Every product has a Qikink SKU (check Admin → Products for red warnings).
-
-> **Note:** the keys currently in `.env.local` are Qikink **sandbox** and Razorpay **test** keys. Orders placed with them are not really printed and no real money moves.
+### Profit Example on 1 T-Shirt:
+- Customer pays on website: **₹999**
+- Qikink manufacturing cost (Garment + DTF print + Packaging): **~₹380**
+- **Your Net Profit on 1 sale:** **~₹619 PROFIT**
 
 ---
 
-_The accompanying `HOTBEE_Brother_Admin_Guide.pdf` was generated from an earlier version of this document and is now out of date — use this Markdown file._
+## 6. BROTHER'S GOLDEN RULES FOR DAILY OPERATIONS
+
+1. **Keep ₹1,500 – ₹2,500 in your Qikink Wallet:** Qikink deducts the raw blank tee cost (~₹380) automatically from your wallet when printing. If your wallet is empty, orders will pause. Top up at _board.qikink.com → Wallet_.
+2. **Check Admin Daily:** Open **hotbee.netlify.app/admin/orders** once a day to see new orders.
+3. **Hit "Sync from Qikink":** Once every morning, tap the sync button to refresh tracking numbers.
+4. **Keep adding fresh designs:** Whenever you make a cool new concept on Qikink, publish it to HOTBEE immediately to give customers new drops!
