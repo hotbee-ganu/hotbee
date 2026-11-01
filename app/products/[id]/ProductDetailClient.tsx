@@ -129,41 +129,70 @@ export default function ProductDetailClient({ productId }: { productId: string }
               </div>
             </div>
           ) : (
-            <>
-              <div className="relative aspect-[4/5] rounded-3xl overflow-hidden glass-panel border border-hotbee-500/20 shadow-glow-gold-lg">
-                <Image
-                  src={selectedImage || product.images[0]}
-                  alt={product.title}
-                  fill
-                  className="object-cover object-center"
-                  priority
-                />
-                {product.discountPercentage > 0 && (
-                  <span className="absolute top-4 left-4 bg-gradient-to-r from-amber-500 to-yellow-500 text-black font-extrabold text-xs px-3 py-1 rounded-full shadow-lg">
-                    {product.discountPercentage}% OFF
-                  </span>
-                )}
+            <div className="relative aspect-[4/5] rounded-3xl overflow-hidden glass-panel border border-hotbee-500/20 shadow-glow-gold-lg">
+              <Image
+                src={selectedImage || product.images[0]}
+                alt={product.title}
+                fill
+                unoptimized={(selectedImage || product.images[0]).startsWith('data:')}
+                className="object-cover object-center"
+                priority
+              />
+              {product.discountPercentage > 0 && (
+                <span className="absolute top-4 left-4 bg-gradient-to-r from-amber-500 to-yellow-500 text-black font-extrabold text-xs px-3 py-1 rounded-full shadow-lg">
+                  {product.discountPercentage}% OFF
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Thumbnails - Visible in BOTH 3D & Photo modes */}
+          {product.images.length > 1 && (
+            <div className="space-y-2 pt-2">
+              <div className="flex items-center justify-between text-xs text-gray-400">
+                <span className="font-bold text-gray-200 flex items-center gap-1.5">
+                  <Camera className="w-3.5 h-3.5 text-hotbee-500" />
+                  Available Angles ({product.images.length} views)
+                </span>
+                <span className="text-[11px] text-hotbee-400 font-semibold">
+                  Front, Back &amp; Sides
+                </span>
               </div>
 
-              {/* Thumbnails */}
-              {product.images.length > 1 && (
-                <div className="flex gap-3 overflow-x-auto pb-2">
-                  {product.images.map((img, i) => (
+              <div className="flex gap-3 overflow-x-auto pb-2">
+                {product.images.map((img, i) => {
+                  const isSelected = (selectedImage || product.images[0]) === img;
+                  const label = i === 0 ? 'Front View' : i === 1 ? 'Back View' : i === 2 ? 'Side View' : `Angle ${i + 1}`;
+                  return (
                     <button
                       key={i}
-                      onClick={() => setSelectedImage(img)}
-                      className={`relative w-20 aspect-square rounded-xl overflow-hidden glass-panel border transition-all ${
-                        (selectedImage || product.images[0]) === img
-                          ? 'border-hotbee-500 shadow-glow-gold'
-                          : 'border-hotbee-500/10 opacity-70 hover:opacity-100'
+                      onClick={() => {
+                        setSelectedImage(img);
+                        if (viewMode === '3d') {
+                          setViewMode('photos');
+                        }
+                      }}
+                      className={`relative w-20 sm:w-24 aspect-[4/5] rounded-2xl overflow-hidden glass-panel border transition-all shrink-0 group ${
+                        isSelected
+                          ? 'border-hotbee-500 ring-2 ring-hotbee-500/50 shadow-glow-gold scale-[1.02]'
+                          : 'border-white/10 opacity-70 hover:opacity-100 hover:border-hotbee-500/30'
                       }`}
                     >
-                      <Image src={img} alt={`Preview ${i}`} fill className="object-cover" />
+                      <Image
+                        src={img}
+                        alt={`${product.title} - ${label}`}
+                        fill
+                        unoptimized={img.startsWith('data:')}
+                        className="object-cover"
+                      />
+                      <span className="absolute bottom-1 inset-x-1 text-center bg-black/85 backdrop-blur-xs text-[9px] font-extrabold uppercase px-1 py-0.5 rounded text-white group-hover:text-hotbee-400 transition-colors">
+                        {label}
+                      </span>
                     </button>
-                  ))}
-                </div>
-              )}
-            </>
+                  );
+                })}
+              </div>
+            </div>
           )}
         </div>
 

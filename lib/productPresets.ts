@@ -91,7 +91,8 @@ export const slugify = (value: string) =>
     .slice(0, 80);
 
 export const buildProductFromDesign = (input: {
-  imageUrl: string;
+  imageUrl?: string;
+  images?: string[];
   title: string;
   category?: string;
   price: number;
@@ -109,6 +110,13 @@ export const buildProductFromDesign = (input: {
   const discountPercentage =
     originalPrice > price ? Math.round(((originalPrice - price) / originalPrice) * 100) : 0;
 
+  const rawImages = Array.isArray(input.images) && input.images.length > 0
+    ? input.images
+    : input.imageUrl
+      ? [input.imageUrl]
+      : [];
+  const images = rawImages.filter((img): img is string => typeof img === 'string' && img.trim().length > 0);
+
   return {
     id: input.id || `hb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     qikink_id: input.qikinkSku?.trim() || undefined,
@@ -122,7 +130,7 @@ export const buildProductFromDesign = (input: {
     reviewsCount: 0,
     category,
     collection: input.collection?.trim() || preset.collection,
-    images: [input.imageUrl],
+    images: images.length > 0 ? images : ['https://images.unsplash.com/photo-1521572267360-ee0c2909d518?w=900&auto=format&fit=crop&q=80'],
     colors: preset.colors,
     sizes: preset.sizes,
     inStock: true,

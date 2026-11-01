@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json().catch(() => null);
-  const { designId, title, category, price, originalPrice, qikinkSku, collection, description } = body || {};
+  const { designId, title, category, price, originalPrice, qikinkSku, collection, description, images } = body || {};
 
   if (!designId || !title || !price) {
     return NextResponse.json({ error: 'Design, title and price are required.' }, { status: 400 });
@@ -36,8 +36,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Design not found.' }, { status: 404 });
     }
 
+    const productImages = Array.isArray(images) && images.length > 0 ? images : [design.imageUrl];
+
     const product = buildProductFromDesign({
       imageUrl: design.imageUrl,
+      images: productImages,
       title,
       category,
       price: Number(price),

@@ -13,6 +13,9 @@ import {
   X,
   ImageIcon,
   RefreshCw,
+  Plus,
+  Check,
+  Layers,
 } from 'lucide-react';
 import { AdminSidebar } from '@/components/AdminSidebar';
 import { useStore } from '@/lib/store';
@@ -85,11 +88,15 @@ export default function AdminDesignsPage() {
   const [notice, setNotice] = useState<{ tone: 'ok' | 'warn'; text: string } | null>(null);
 
   const [publishTarget, setPublishTarget] = useState<Design | null>(null);
+  const [publishImages, setPublishImages] = useState<string[]>([]);
+  const [showVaultPicker, setShowVaultPicker] = useState(false);
+  const [uploadingAngle, setUploadingAngle] = useState(false);
   const [draft, setDraft] = useState<PublishDraft>(emptyDraft(''));
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const angleInputRef = useRef<HTMLInputElement>(null);
 
   const loadDesigns = useCallback(async () => {
     try {
@@ -215,8 +222,56 @@ export default function AdminDesignsPage() {
 
   const openPublish = (design: Design) => {
     setPublishTarget(design);
+    setPublishImages([design.imageUrl]);
+    setShowVaultPicker(false);
     setDraft({ ...emptyDraft(design.fileName), qikinkSku: design.qikinkSku || '' });
     setPublishError('');
+  };
+
+  const handleAddAngleFiles = async (files: FileList | File[]) => {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+    setUploadingAngle(true);
+
+    try {
+      const form = new FormData();
+      list.forEach((f) => form.append('files', f));
+      const res = await fetch('/api/designs', { method: 'POST', body: form });
+      const data = await res.json();
+      if (res.ok && data?.uploaded?.length) {
+        const newUrls = data.uploaded.map((d: any) => d.imageUrl);
+        setPublishImages((prev) => [...prev, ...newUrls]);
+        await loadDesigns();
+        setUploadingAngle(false);
+        return;
+      }
+    } catch {}
+
+    try {
+      const dataUrls: string[] = [];
+      for (const file of list) {
+        const url = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.readAsDataURL(file);
+        });
+        dataUrls.push(url);
+      }
+      setPublishImages((prev) => [...prev, ...dataUrls]);
+    } finally {
+      setUploadingAngle(false);
+      if (angleInputRef.current) angleInputRef.current.value = '';
+    }
+  };
+
+  const handleToggleVaultImage = (url: string) => {
+    setPublishImages((prev) => {
+      if (prev.includes(url)) {
+        if (prev.length <= 1) return prev;
+        return prev.filter((img) => img !== url);
+      }
+      return [...prev, url];
+    });
   };
 
   const onCategoryChange = (category: string) => {
@@ -236,6 +291,8 @@ export default function AdminDesignsPage() {
     setPublishing(true);
     setPublishError('');
 
+    const imagesToPublish = publishImages.length > 0 ? publishImages : [publishTarget.imageUrl];
+
     const isLocalDesign =
       publishTarget.storagePath === 'local' ||
       publishTarget.id.startsWith('local-') ||
@@ -244,7 +301,8 @@ export default function AdminDesignsPage() {
     if (isLocalDesign) {
       try {
         const product = buildProductFromDesign({
-          imageUrl: publishTarget.imageUrl,
+          imageUrl: imagesToPublish[0],
+          images: imagesToPublish,
           title: draft.title,
           category: draft.category,
           price: Number(draft.price),
@@ -263,7 +321,7 @@ export default function AdminDesignsPage() {
             prev.map((d) => (d.id === publishTarget.id ? { ...d, publishedProductId: product.id } : d))
           );
           setPublishTarget(null);
-          setNotice({ tone: 'ok', text: `"${product.title}" is now published and live on the store!` });
+          setNotice({ tone: 'ok', text: `"${product.title}" (${imagesToPublish.length} photos) is now published and live on the store!` });
           await refreshProducts();
         } else {
           setPublishError(res.message || 'Could not publish the product.');
@@ -282,6 +340,7 @@ export default function AdminDesignsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           designId: publishTarget.id,
+          images: imagesToPublish,
           title: draft.title,
           category: draft.category,
           price: Number(draft.price),
@@ -294,7 +353,8 @@ export default function AdminDesignsPage() {
       if (!res.ok) {
         // Fall back to direct local publish
         const product = buildProductFromDesign({
-          imageUrl: publishTarget.imageUrl,
+          imageUrl: imagesToPublish[0],
+          images: imagesToPublish,
           title: draft.title,
           category: draft.category,
           price: Number(draft.price),
@@ -305,17 +365,18 @@ export default function AdminDesignsPage() {
         setPublishTarget(null);
         setNotice({
           tone: 'ok',
-          text: `"${product.title}" published locally to store (Supabase was unreachable).`,
+          text: `"${product.title}" published locally to store.`,
         });
         await refreshProducts();
       } else {
         setPublishTarget(null);
-        setNotice({ tone: 'ok', text: `"${data.product.title}" is now live on the store.` });
+        setNotice({ tone: 'ok', text: `"${data.product.title}" (${imagesToPublish.length} photos) is now live on the store.` });
         await Promise.all([loadDesigns(), refreshProducts()]);
       }
     } catch {
       const product = buildProductFromDesign({
-        imageUrl: publishTarget.imageUrl,
+        imageUrl: imagesToPublish[0],
+        images: imagesToPublish,
         title: draft.title,
         category: draft.category,
         price: Number(draft.price),
@@ -755,6 +816,133 @@ export default function AdminDesignsPage() {
                       className="w-full glass-input rounded-xl px-3 py-2.5 text-xs"
                     />
                   </div>
+                </div>
+
+                {/* Multi-angle mockups selector */}
+                <div className="space-y-2 pt-2 border-t border-white/10">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="font-bold text-white block text-xs">
+                        Product Mockups & Angles ({publishImages.length})
+                      </span>
+                      <span className="text-[10px] text-gray-400">
+                        Add Front, Back & Side views so customers can see every angle in 3D & gallery.
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        ref={angleInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp,image/avif"
+                        multiple
+                        hidden
+                        onChange={(e) => e.target.files && handleAddAngleFiles(e.target.files)}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => angleInputRef.current?.click()}
+                        disabled={uploadingAngle}
+                        className="px-2.5 py-1 rounded-lg bg-hotbee-500/10 hover:bg-hotbee-500/20 text-hotbee-400 border border-hotbee-500/30 text-[11px] font-bold flex items-center gap-1 transition-all disabled:opacity-50"
+                      >
+                        {uploadingAngle ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Plus className="w-3 h-3" />
+                        )}
+                        <span>Upload Angle</span>
+                      </button>
+
+                      {designs.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowVaultPicker((v) => !v)}
+                          className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 border border-white/10 text-[11px] font-bold flex items-center gap-1 transition-all"
+                        >
+                          <ImageIcon className="w-3 h-3 text-hotbee-500" />
+                          <span>{showVaultPicker ? 'Close Vault' : 'Pick from Vault'}</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Thumbnail cards strip */}
+                  <div className="grid grid-cols-4 sm:grid-cols-5 gap-2 pt-1">
+                    {publishImages.map((img, idx) => (
+                      <div
+                        key={idx}
+                        className="relative aspect-[4/5] rounded-xl overflow-hidden bg-hotbee-darker border border-hotbee-500/30 group shadow-md"
+                      >
+                        <Image
+                          src={img}
+                          alt={`Angle ${idx + 1}`}
+                          fill
+                          unoptimized={img.startsWith('data:')}
+                          className="object-cover"
+                        />
+                        <span className="absolute bottom-1 inset-x-1 text-center bg-black/85 backdrop-blur-xs text-[8px] font-extrabold uppercase px-1 py-0.5 rounded text-hotbee-400 truncate">
+                          {idx === 0 ? '1. Front' : idx === 1 ? '2. Back' : idx === 2 ? '3. Side' : `Angle ${idx + 1}`}
+                        </span>
+                        {publishImages.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setPublishImages((prev) => prev.filter((_, i) => i !== idx))}
+                            className="absolute top-1 right-1 w-4 h-4 rounded-full bg-red-500/90 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="Remove angle"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Vault picker dropdown */}
+                  {showVaultPicker && (
+                    <div className="p-3 rounded-2xl bg-black/60 border border-hotbee-500/20 space-y-2 mt-2">
+                      <div className="flex items-center justify-between text-[11px] text-gray-400">
+                        <span>Tap any mockup from your Vault to attach as Back or Side angle:</span>
+                        <button
+                          type="button"
+                          onClick={() => setShowVaultPicker(false)}
+                          className="text-gray-400 hover:text-white"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-5 sm:grid-cols-6 gap-2 max-h-36 overflow-y-auto pr-1">
+                        {designs.map((d) => {
+                          const isSelected = publishImages.includes(d.imageUrl);
+                          return (
+                            <button
+                              key={d.id}
+                              type="button"
+                              onClick={() => handleToggleVaultImage(d.imageUrl)}
+                              className={`relative aspect-[4/5] rounded-lg overflow-hidden border transition-all ${
+                                isSelected
+                                  ? 'border-hotbee-500 ring-2 ring-hotbee-500/50 scale-95'
+                                  : 'border-white/10 hover:border-white/30 opacity-70 hover:opacity-100'
+                              }`}
+                              title={d.fileName}
+                            >
+                              <Image
+                                src={d.imageUrl}
+                                alt={d.fileName}
+                                fill
+                                unoptimized={d.imageUrl.startsWith('data:')}
+                                className="object-cover"
+                              />
+                              {isSelected && (
+                                <div className="absolute inset-0 bg-hotbee-500/25 flex items-center justify-center">
+                                  <Check className="w-4 h-4 text-hotbee-400 bg-black/70 rounded-full p-0.5" />
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <button

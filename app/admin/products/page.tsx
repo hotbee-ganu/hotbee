@@ -794,6 +794,62 @@ export default function AdminProductsPage() {
                   <span className="font-bold text-gray-300">Visible and in stock on the storefront</span>
                 </label>
 
+                {/* Images & Angles management in Edit Modal */}
+                <div className="space-y-2 pt-2 border-t border-white/10">
+                  <div className="flex items-center justify-between">
+                    <label className="font-bold text-gray-300 block">
+                      Product Images &amp; Angles ({editing.images?.length || 0})
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const url = window.prompt('Enter image URL or paste image link:');
+                        if (url && url.trim()) {
+                          setEditing({ ...editing, images: [...(editing.images || []), url.trim()] });
+                        }
+                      }}
+                      className="px-2 py-0.5 rounded-lg bg-hotbee-500/10 hover:bg-hotbee-500/20 text-hotbee-400 border border-hotbee-500/30 text-[10px] font-bold inline-flex items-center gap-1"
+                    >
+                      <Plus className="w-3 h-3" /> Add Image URL
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-4 sm:grid-cols-5 gap-2 pt-1">
+                    {(editing.images || []).map((img, idx) => (
+                      <div
+                        key={idx}
+                        className="relative aspect-[4/5] rounded-xl overflow-hidden bg-hotbee-darker border border-hotbee-500/30 group shadow-md"
+                      >
+                        <Image
+                          src={img}
+                          alt={`Angle ${idx + 1}`}
+                          fill
+                          unoptimized={img.startsWith('data:')}
+                          className="object-cover"
+                        />
+                        <span className="absolute bottom-1 inset-x-1 text-center bg-black/85 backdrop-blur-xs text-[8px] font-extrabold uppercase px-1 py-0.5 rounded text-hotbee-400 truncate">
+                          {idx === 0 ? 'Front' : idx === 1 ? 'Back' : idx === 2 ? 'Side' : `Angle ${idx + 1}`}
+                        </span>
+                        {(editing.images || []).length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEditing({
+                                ...editing,
+                                images: editing.images.filter((_, i) => i !== idx),
+                              })
+                            }
+                            className="absolute top-1 right-1 w-4 h-4 rounded-full bg-red-500/90 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="Remove image"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
                 <button
                   type="submit"
                   disabled={busy}
