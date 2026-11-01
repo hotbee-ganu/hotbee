@@ -74,6 +74,28 @@ export const isMissingTableError = (message: string | undefined) => {
   return m.includes('could not find the table') || m.includes('does not exist');
 };
 
+export const isConnectionError = (err: unknown): boolean => {
+  if (!err) return false;
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return (
+    msg.includes('fetch failed') ||
+    msg.includes('enotfound') ||
+    msg.includes('econnrefused') ||
+    msg.includes('network') ||
+    msg.includes('timeout')
+  );
+};
+
+export class SupabaseUnreachableError extends Error {
+  constructor(message?: string) {
+    super(
+      message ||
+        'Cannot reach Supabase database. The project may be paused in your Supabase dashboard, or the URL is unreachable.'
+    );
+    this.name = 'SupabaseUnreachableError';
+  }
+}
+
 export class SetupRequiredError extends Error {
   constructor(message: string) {
     super(message);
@@ -85,35 +107,53 @@ export const fetchProducts = async (): Promise<Product[] | null> => {
   const db = getSupabaseAdmin();
   if (!db) return null;
 
-  const { data, error } = await db.from('products').select('*').order('created_at', { ascending: false });
+  try {
+    const { data, error } = await db.from('products').select('*').order('created_at', { ascending: false });
 
-  if (error) {
-    if (isMissingTableError(error.message)) {
-      throw new SetupRequiredError(
-        'The database tables have not been created yet. Run supabase/setup.sql in the Supabase SQL editor.'
-      );
+    if (error) {
+      if (isMissingTableError(error.message)) {
+        throw new SetupRequiredError(
+          'The database tables have not been created yet. Run supabase/setup.sql in the Supabase SQL editor.'
+        );
+      }
+      throw new Error(error.message);
     }
-    throw new Error(error.message);
-  }
 
-  return (data || []).map(rowToProduct);
+    return (data || []).map(rowToProduct);
+  } catch (err) {
+    if (err instanceof SetupRequiredError) throw err;
+    if (isConnectionError(err)) {
+      throw new SupabaseUnreachableError();
+    }
+    throw err;
+  }
 };
 
 export const upsertProduct = async (product: Product): Promise<Product> => {
   const db = getSupabaseAdmin();
   if (!db) throw new Error('Supabase is not configured.');
 
-  const { data, error } = await db.from('products').upsert(productToRow(product)).select().single();
-  if (error) throw new Error(error.message);
-  return rowToProduct(data);
+  try {
+    const { data, error } = await db.from('products').upsert(productToRow(product)).select().single();
+    if (error) throw new Error(error.message);
+    return rowToProduct(data);
+  } catch (err) {
+    if (isConnectionError(err)) throw new SupabaseUnreachableError();
+    throw err;
+  }
 };
 
 export const deleteProductById = async (id: string): Promise<void> => {
   const db = getSupabaseAdmin();
   if (!db) throw new Error('Supabase is not configured.');
 
-  const { error } = await db.from('products').delete().eq('id', id);
-  if (error) throw new Error(error.message);
+  try {
+    const { error } = await db.from('products').delete().eq('id', id);
+    if (error) throw new Error(error.message);
+  } catch (err) {
+    if (isConnectionError(err)) throw new SupabaseUnreachableError();
+    throw err;
+  }
 };
 
 /** SKU lookup used when pushing an order to Qikink. */
@@ -121,13 +161,17 @@ export const fetchSkuMap = async (productIds: string[]): Promise<Record<string, 
   const db = getSupabaseAdmin();
   if (!db || productIds.length === 0) return {};
 
-  const { data, error } = await db.from('products').select('id, qikink_id').in('id', productIds);
-  if (error) return {};
+  try {
+    const { data, error } = await db.from('products').select('id, qikink_id').in('id', productIds);
+    if (error) return {};
 
-  return (data || []).reduce<Record<string, string>>((acc, row: any) => {
-    if (row.qikink_id) acc[row.id] = row.qikink_id;
-    return acc;
-  }, {});
+    return (data || []).reduce<Record<string, string>>((acc, row: any) => {
+      if (row.qikink_id) acc[row.id] = row.qikink_id;
+      return acc;
+    }, {});
+  } catch {
+    return {};
+  }
 };
 
 // --- Designs ---
@@ -146,18 +190,26 @@ export const fetchDesigns = async (): Promise<DesignRow[] | null> => {
   const db = getSupabaseAdmin();
   if (!db) return null;
 
-  const { data, error } = await db.from('designs').select('*').order('created_at', { ascending: false });
+  try {
+    const { data, error } = await db.from('designs').select('*').order('created_at', { ascending: false });
 
-  if (error) {
-    if (isMissingTableError(error.message)) {
-      throw new SetupRequiredError(
-        'The designs table does not exist yet. Run supabase/setup.sql in the Supabase SQL editor.'
-      );
+    if (error) {
+      if (isMissingTableError(error.message)) {
+        throw new SetupRequiredError(
+          'The designs table does not exist yet. Run supabase/setup.sql in the Supabase SQL editor.'
+        );
+      }
+      throw new Error(error.message);
     }
-    throw new Error(error.message);
-  }
 
-  return (data || []).map(rowToDesign);
+    return (data || []).map(rowToDesign);
+  } catch (err) {
+    if (err instanceof SetupRequiredError) throw err;
+    if (isConnectionError(err)) {
+      throw new SupabaseUnreachableError();
+    }
+    throw err;
+  }
 };
 
 export const insertDesign = async (design: {
@@ -169,35 +221,50 @@ export const insertDesign = async (design: {
   const db = getSupabaseAdmin();
   if (!db) throw new Error('Supabase is not configured.');
 
-  const { data, error } = await db
-    .from('designs')
-    .insert({
-      file_name: design.fileName,
-      image_url: design.imageUrl,
-      storage_path: design.storagePath,
-      qikink_sku: design.qikinkSku || null,
-    })
-    .select()
-    .single();
+  try {
+    const { data, error } = await db
+      .from('designs')
+      .insert({
+        file_name: design.fileName,
+        image_url: design.imageUrl,
+        storage_path: design.storagePath,
+        qikink_sku: design.qikinkSku || null,
+      })
+      .select()
+      .single();
 
-  if (error) throw new Error(error.message);
-  return rowToDesign(data);
+    if (error) throw new Error(error.message);
+    return rowToDesign(data);
+  } catch (err) {
+    if (isConnectionError(err)) throw new SupabaseUnreachableError();
+    throw err;
+  }
 };
 
 export const markDesignPublished = async (designId: string, productId: string | null): Promise<void> => {
   const db = getSupabaseAdmin();
   if (!db) throw new Error('Supabase is not configured.');
 
-  const { error } = await db.from('designs').update({ published_product_id: productId }).eq('id', designId);
-  if (error) throw new Error(error.message);
+  try {
+    const { error } = await db.from('designs').update({ published_product_id: productId }).eq('id', designId);
+    if (error) throw new Error(error.message);
+  } catch (err) {
+    if (isConnectionError(err)) throw new SupabaseUnreachableError();
+    throw err;
+  }
 };
 
 export const deleteDesignById = async (designId: string): Promise<void> => {
   const db = getSupabaseAdmin();
   if (!db) throw new Error('Supabase is not configured.');
 
-  const { error } = await db.from('designs').delete().eq('id', designId);
-  if (error) throw new Error(error.message);
+  try {
+    const { error } = await db.from('designs').delete().eq('id', designId);
+    if (error) throw new Error(error.message);
+  } catch (err) {
+    if (isConnectionError(err)) throw new SupabaseUnreachableError();
+    throw err;
+  }
 };
 
 // --- Orders ---
@@ -206,24 +273,28 @@ export const persistOrder = async (order: any): Promise<void> => {
   const db = getSupabaseAdmin();
   if (!db) return;
 
-  await db.from('orders').upsert({
-    id: order.id,
-    tracking_number: order.trackingNumber,
-    customer_name: order.customerName,
-    customer_email: order.customerEmail,
-    customer_phone: order.customerPhone,
-    shipping_address: order.shippingAddress,
-    items: order.items,
-    subtotal: order.subtotal,
-    discount: order.discount,
-    shipping_fee: order.shippingFee,
-    total_amount: order.totalAmount,
-    payment_method: order.paymentMethod,
-    payment_status: order.paymentStatus,
-    razorpay_payment_id: order.razorpayPaymentId || null,
-    qikink_order_id: order.qikinkOrderId || null,
-    status: order.status,
-    estimated_delivery: order.estimatedDelivery,
-    courier_name: order.courierName || null,
-  });
+  try {
+    await db.from('orders').upsert({
+      id: order.id,
+      tracking_number: order.trackingNumber,
+      customer_name: order.customerName,
+      customer_email: order.customerEmail,
+      customer_phone: order.customerPhone,
+      shipping_address: order.shippingAddress,
+      items: order.items,
+      subtotal: order.subtotal,
+      discount: order.discount,
+      shipping_fee: order.shippingFee,
+      total_amount: order.totalAmount,
+      payment_method: order.paymentMethod,
+      payment_status: order.paymentStatus,
+      razorpay_payment_id: order.razorpayPaymentId || null,
+      qikink_order_id: order.qikinkOrderId || null,
+      status: order.status,
+      estimated_delivery: order.estimatedDelivery,
+      courier_name: order.courierName || null,
+    });
+  } catch (err) {
+    console.error('Failed to persist order to Supabase:', err);
+  }
 };

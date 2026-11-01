@@ -156,13 +156,13 @@ export default function ThreeBackground() {
 
     // ─── Render Loop ────────────────────────────────────────────────────────
     let frameId: number;
-    const clock = new THREE.Clock();
+    const startTime = performance.now();
     const posAttr = planeGeo.attributes.position;
     const count = posAttr.count;
 
     const animate = () => {
       frameId = requestAnimationFrame(animate);
-      const t = clock.getElapsedTime();
+      const t = (performance.now() - startTime) * 0.001;
 
       // Fluid wave
       const orig = originalPositions.array as Float32Array;

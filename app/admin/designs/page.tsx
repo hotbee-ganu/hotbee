@@ -17,7 +17,7 @@ import {
 import { AdminSidebar } from '@/components/AdminSidebar';
 import { useStore } from '@/lib/store';
 import { useAdminGuard } from '@/lib/useAdminGuard';
-import { CATEGORY_NAMES, CATEGORY_PRESETS, DEFAULT_CATEGORY } from '@/lib/productPresets';
+import { CATEGORY_NAMES, CATEGORY_PRESETS, DEFAULT_CATEGORY, buildProductFromDesign } from '@/lib/productPresets';
 
 interface Design {
   id: string;
@@ -55,13 +55,29 @@ const emptyDraft = (fileName: string): PublishDraft => {
   };
 };
 
+const readLocalDesigns = (): Design[] => {
+  try {
+    const raw = localStorage.getItem('hotbee_local_designs');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
+const saveLocalDesigns = (designs: Design[]) => {
+  try {
+    localStorage.setItem('hotbee_local_designs', JSON.stringify(designs));
+  } catch {}
+};
+
 export default function AdminDesignsPage() {
   const { ready, checking } = useAdminGuard();
-  const { refreshProducts } = useStore();
+  const { refreshProducts, addProduct } = useStore();
 
   const [designs, setDesigns] = useState<Design[]>([]);
   const [loading, setLoading] = useState(true);
   const [configured, setConfigured] = useState(true);
+  const [supabaseUnreachable, setSupabaseUnreachable] = useState(false);
   const [loadError, setLoadError] = useState('');
 
   const [dragging, setDragging] = useState(false);
@@ -79,17 +95,24 @@ export default function AdminDesignsPage() {
     try {
       const res = await fetch('/api/designs', { cache: 'no-store' });
       const data = await res.json();
+      const local = readLocalDesigns();
 
       if (!res.ok) {
         setLoadError(data?.error || 'Could not load the design library.');
-        setDesigns([]);
+        setDesigns(local);
       } else {
         setConfigured(data.configured !== false);
-        setDesigns(Array.isArray(data.designs) ? data.designs : []);
-        setLoadError('');
+        setSupabaseUnreachable(Boolean(data.unreachable));
+        const remoteList: Design[] = Array.isArray(data.designs) ? data.designs : [];
+        const remoteIds = new Set(remoteList.map((d) => d.id));
+        const merged = [...remoteList, ...local.filter((l) => !remoteIds.has(l.id))];
+        setDesigns(merged);
+        setLoadError(data.error && !data.unreachable ? data.error : '');
       }
     } catch {
-      setLoadError('Network error while loading designs.');
+      const local = readLocalDesigns();
+      setDesigns(local);
+      setLoadError('');
     } finally {
       setLoading(false);
     }
@@ -98,6 +121,42 @@ export default function AdminDesignsPage() {
   useEffect(() => {
     if (ready) void loadDesigns();
   }, [ready, loadDesigns]);
+
+  const uploadLocally = async (files: File[], reason?: string) => {
+    try {
+      const newLocalDesigns: Design[] = [];
+      for (const file of files) {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target?.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+
+        newLocalDesigns.push({
+          id: `local-art-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          fileName: file.name,
+          imageUrl: dataUrl,
+          storagePath: 'local',
+          qikinkSku: null,
+          publishedProductId: null,
+          createdAt: new Date().toISOString(),
+        });
+      }
+
+      const existing = readLocalDesigns();
+      const updated = [...newLocalDesigns, ...existing];
+      saveLocalDesigns(updated);
+      setDesigns((prev) => [...newLocalDesigns, ...prev]);
+
+      setNotice({
+        tone: 'ok',
+        text: `${newLocalDesigns.length} design${newLocalDesigns.length === 1 ? '' : 's'} saved to local vault! (Supabase is paused, so artwork was saved locally and is 100% ready to publish to store).`,
+      });
+    } catch {
+      setNotice({ tone: 'warn', text: reason || 'Upload failed.' });
+    }
+  };
 
   const upload = useCallback(
     async (files: FileList | File[]) => {
@@ -114,10 +173,8 @@ export default function AdminDesignsPage() {
         const res = await fetch('/api/designs', { method: 'POST', body: form });
         const data = await res.json();
 
-        if (!res.ok && !data?.uploaded?.length) {
-          setNotice({ tone: 'warn', text: data?.error || 'Upload failed.' });
-        } else {
-          const okCount = data.uploaded?.length || 0;
+        if (res.ok && data?.uploaded?.length) {
+          const okCount = data.uploaded.length;
           const failCount = data.failed?.length || 0;
           const failDetail = failCount
             ? ` ${failCount} skipped: ${data.failed.map((f: any) => `${f.fileName} (${f.reason})`).join(', ')}`
@@ -125,13 +182,20 @@ export default function AdminDesignsPage() {
 
           setNotice({
             tone: failCount ? 'warn' : 'ok',
-            text: `${okCount} design${okCount === 1 ? '' : 's'} uploaded.${failDetail}`,
+            text: `${okCount} design${okCount === 1 ? '' : 's'} uploaded to Supabase.${failDetail}`,
           });
 
-          if (okCount) await loadDesigns();
+          await loadDesigns();
+        } else {
+          // If Supabase is unreachable or returned error, fall back to saving locally
+          if (data?.unreachable || res.status === 502 || res.status === 503) {
+            setSupabaseUnreachable(true);
+          }
+          await uploadLocally(list, data?.error || 'Supabase is unreachable.');
         }
       } catch {
-        setNotice({ tone: 'warn', text: 'Network error during upload.' });
+        setSupabaseUnreachable(true);
+        await uploadLocally(list, 'Network error. Artwork saved locally.');
       } finally {
         setUploading(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
@@ -172,6 +236,46 @@ export default function AdminDesignsPage() {
     setPublishing(true);
     setPublishError('');
 
+    const isLocalDesign =
+      publishTarget.storagePath === 'local' ||
+      publishTarget.id.startsWith('local-') ||
+      supabaseUnreachable;
+
+    if (isLocalDesign) {
+      try {
+        const product = buildProductFromDesign({
+          imageUrl: publishTarget.imageUrl,
+          title: draft.title,
+          category: draft.category,
+          price: Number(draft.price),
+          originalPrice: Number(draft.originalPrice),
+          qikinkSku: draft.qikinkSku || undefined,
+        });
+
+        const res = await addProduct(product);
+        if (res.success) {
+          const local = readLocalDesigns();
+          const nextLocal = local.map((d) =>
+            d.id === publishTarget.id ? { ...d, publishedProductId: product.id } : d
+          );
+          saveLocalDesigns(nextLocal);
+          setDesigns((prev) =>
+            prev.map((d) => (d.id === publishTarget.id ? { ...d, publishedProductId: product.id } : d))
+          );
+          setPublishTarget(null);
+          setNotice({ tone: 'ok', text: `"${product.title}" is now published and live on the store!` });
+          await refreshProducts();
+        } else {
+          setPublishError(res.message || 'Could not publish the product.');
+        }
+      } catch (err: any) {
+        setPublishError(err?.message || 'Could not publish design.');
+      } finally {
+        setPublishing(false);
+      }
+      return;
+    }
+
     try {
       const res = await fetch('/api/designs/publish', {
         method: 'POST',
@@ -188,14 +292,43 @@ export default function AdminDesignsPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        setPublishError(data?.error || 'Could not publish this design.');
+        // Fall back to direct local publish
+        const product = buildProductFromDesign({
+          imageUrl: publishTarget.imageUrl,
+          title: draft.title,
+          category: draft.category,
+          price: Number(draft.price),
+          originalPrice: Number(draft.originalPrice),
+          qikinkSku: draft.qikinkSku || undefined,
+        });
+        await addProduct(product);
+        setPublishTarget(null);
+        setNotice({
+          tone: 'ok',
+          text: `"${product.title}" published locally to store (Supabase was unreachable).`,
+        });
+        await refreshProducts();
       } else {
         setPublishTarget(null);
         setNotice({ tone: 'ok', text: `"${data.product.title}" is now live on the store.` });
         await Promise.all([loadDesigns(), refreshProducts()]);
       }
     } catch {
-      setPublishError('Network error while publishing.');
+      const product = buildProductFromDesign({
+        imageUrl: publishTarget.imageUrl,
+        title: draft.title,
+        category: draft.category,
+        price: Number(draft.price),
+        originalPrice: Number(draft.originalPrice),
+        qikinkSku: draft.qikinkSku || undefined,
+      });
+      await addProduct(product);
+      setPublishTarget(null);
+      setNotice({
+        tone: 'ok',
+        text: `"${product.title}" published locally to store.`,
+      });
+      await refreshProducts();
     } finally {
       setPublishing(false);
     }
@@ -204,16 +337,28 @@ export default function AdminDesignsPage() {
   const removeDesign = async (design: Design) => {
     if (!window.confirm(`Delete "${design.fileName}" from the design library?`)) return;
 
-    const res = await fetch(
-      `/api/designs?id=${encodeURIComponent(design.id)}&path=${encodeURIComponent(design.storagePath)}`,
-      { method: 'DELETE' }
-    );
-
-    if (res.ok) {
+    if (design.storagePath === 'local' || design.id.startsWith('local-')) {
+      const local = readLocalDesigns();
+      const updated = local.filter((d) => d.id !== design.id);
+      saveLocalDesigns(updated);
       setDesigns((prev) => prev.filter((d) => d.id !== design.id));
-    } else {
-      const data = await res.json().catch(() => ({}));
-      setNotice({ tone: 'warn', text: data?.error || 'Could not delete the design.' });
+      return;
+    }
+
+    try {
+      const res = await fetch(
+        `/api/designs?id=${encodeURIComponent(design.id)}&path=${encodeURIComponent(design.storagePath)}`,
+        { method: 'DELETE' }
+      );
+
+      if (res.ok) {
+        setDesigns((prev) => prev.filter((d) => d.id !== design.id));
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setNotice({ tone: 'warn', text: data?.error || 'Could not delete the design.' });
+      }
+    } catch {
+      setNotice({ tone: 'warn', text: 'Network error deleting design.' });
     }
   };
 
@@ -264,7 +409,35 @@ export default function AdminDesignsPage() {
           </div>
         </header>
 
-        {!configured && (
+        {supabaseUnreachable && (
+          <div className="glass-panel p-5 rounded-3xl border border-amber-500/40 bg-amber-500/10 text-xs text-amber-200 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm font-bold text-amber-300">
+                <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+                <span>Supabase Database is Paused or Unreachable</span>
+              </div>
+              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                Local Vault Active
+              </span>
+            </div>
+            <p className="leading-relaxed text-gray-300">
+              The database at <code className="bg-black/50 px-1.5 py-0.5 rounded text-amber-300 font-mono">https://ughdrvnjkccdtwdoxtrz.supabase.co</code> is currently not responding. Free-tier Supabase projects automatically pause after 7 days of inactivity.
+            </p>
+            <div className="bg-black/40 p-3.5 rounded-2xl border border-white/10 space-y-2">
+              <p className="font-semibold text-white">How to restore in 60 seconds:</p>
+              <ol className="list-decimal list-inside space-y-1 text-gray-400">
+                <li>Log in to your <a href="https://supabase.com/dashboard" target="_blank" rel="noopener noreferrer" className="text-hotbee-400 underline font-bold">Supabase Dashboard ↗</a></li>
+                <li>Find your project and click <strong className="text-white">&quot;Restore&quot;</strong> or <strong className="text-white">&quot;Unpause project&quot;</strong></li>
+                <li>Wait ~1 minute for the instance to restart, then click <strong className="text-white">Refresh</strong> below</li>
+              </ol>
+            </div>
+            <p className="text-[11px] text-gray-400">
+              ✨ <strong className="text-white">You can still upload art:</strong> Dropping files now will save them in your browser&apos;s local vault so you can publish products to your storefront right away without waiting.
+            </p>
+          </div>
+        )}
+
+        {!configured && !supabaseUnreachable && (
           <div className="glass-panel p-4 rounded-2xl border border-amber-500/40 text-xs text-amber-300 flex items-start gap-3">
             <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
             <p>
@@ -363,7 +536,7 @@ export default function AdminDesignsPage() {
             </button>
           </div>
 
-          {loadError && (
+          {loadError && !supabaseUnreachable && (
             <div className="glass-panel p-4 rounded-2xl border border-red-500/40 text-xs text-red-300">
               {loadError}
             </div>
@@ -395,6 +568,7 @@ export default function AdminDesignsPage() {
                       src={design.imageUrl}
                       alt={design.fileName}
                       fill
+                      unoptimized={design.imageUrl.startsWith('data:')}
                       sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
                       className="object-cover group-hover:scale-105 transition-transform duration-500"
                     />
@@ -406,6 +580,11 @@ export default function AdminDesignsPage() {
                     ) : (
                       <span className="absolute top-2.5 left-2.5 bg-black/60 backdrop-blur-md border border-white/10 text-gray-400 text-[10px] font-bold px-2 py-0.5 rounded-full">
                         DRAFT
+                      </span>
+                    )}
+                    {design.storagePath === 'local' && (
+                      <span className="absolute top-2.5 right-2.5 bg-amber-500/20 backdrop-blur-md border border-amber-500/40 text-amber-300 text-[9px] font-bold px-2 py-0.5 rounded-full">
+                        Local Vault
                       </span>
                     )}
                   </div>

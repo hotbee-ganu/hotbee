@@ -32,9 +32,20 @@ export const supabaseConnectionStatus = async () => {
   if (!db) {
     return { connected: false, message: 'Supabase URL / service-role key are not set.' };
   }
-  const { error } = await db.from('products').select('id', { count: 'exact', head: true });
-  if (error) {
-    return { connected: false, message: error.message };
+  try {
+    const { error } = await db.from('products').select('id', { count: 'exact', head: true });
+    if (error) {
+      return { connected: false, message: error.message };
+    }
+    return { connected: true, message: 'Connected to Supabase.' };
+  } catch (err: any) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.toLowerCase().includes('fetch failed') || msg.toLowerCase().includes('enotfound')) {
+      return {
+        connected: false,
+        message: 'Cannot reach Supabase. The project may be paused in your Supabase dashboard (free tier pauses after 7 days of inactivity).',
+      };
+    }
+    return { connected: false, message: msg };
   }
-  return { connected: true, message: 'Connected to Supabase.' };
 };

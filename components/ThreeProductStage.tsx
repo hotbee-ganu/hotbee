@@ -175,7 +175,7 @@ export default function ThreeProductStage({
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.25;
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
     rendererRef.current = renderer;
 
     container.innerHTML = '';
@@ -457,7 +457,7 @@ export default function ThreeProductStage({
     window.addEventListener('resize', onResize);
 
     // 10. Animation Loop
-    let clock = new THREE.Clock();
+    let startTime = performance.now();
 
     // Skip rendering while the stage is scrolled out of view.
     let visible = true;
@@ -470,7 +470,7 @@ export default function ThreeProductStage({
       animFrameRef.current = requestAnimationFrame(animate);
       if (!visible) return;
 
-      const elapsedTime = clock.getElapsedTime();
+      const elapsedTime = (performance.now() - startTime) * 0.001;
 
       // Smooth camera zoom damping
       currentZoomRef.current += (targetZoomRef.current - currentZoomRef.current) * 0.08;

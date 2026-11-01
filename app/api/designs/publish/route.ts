@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { isAdminRequest } from '@/lib/admin-auth';
-import { fetchDesigns, markDesignPublished, upsertProduct } from '@/lib/catalog-server';
+import { SupabaseUnreachableError, fetchDesigns, markDesignPublished, upsertProduct } from '@/lib/catalog-server';
 import { CATEGORY_PRESETS, buildProductFromDesign } from '@/lib/productPresets';
 
 export const dynamic = 'force-dynamic';
@@ -52,9 +52,10 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ product: saved });
   } catch (err) {
+    const status = err instanceof SupabaseUnreachableError ? 503 : 500;
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Could not publish the design.' },
-      { status: 500 }
+      { status }
     );
   }
 }

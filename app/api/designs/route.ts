@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server';
 import { isAdminRequest } from '@/lib/admin-auth';
-import { SetupRequiredError, deleteDesignById, fetchDesigns, insertDesign } from '@/lib/catalog-server';
+import {
+  SetupRequiredError,
+  SupabaseUnreachableError,
+  deleteDesignById,
+  fetchDesigns,
+  insertDesign,
+  isConnectionError,
+} from '@/lib/catalog-server';
 import { DESIGN_BUCKET, getSupabaseAdmin } from '@/lib/supabase-server';
 
 export const dynamic = 'force-dynamic';
@@ -27,6 +34,12 @@ export async function GET() {
   } catch (err) {
     if (err instanceof SetupRequiredError) {
       return NextResponse.json({ designs: [], configured: false, setupRequired: true, error: err.message });
+    }
+    if (err instanceof SupabaseUnreachableError) {
+      return NextResponse.json(
+        { designs: [], configured: false, unreachable: true, error: err.message },
+        { status: 200 }
+      );
     }
     return NextResponse.json(
       { designs: null, error: err instanceof Error ? err.message : 'Could not load designs.' },
@@ -83,36 +96,59 @@ export async function POST(request: Request) {
       .toString(36)
       .slice(2, 8)}${extension}`;
 
-    const { error: uploadError } = await db.storage
-      .from(DESIGN_BUCKET)
-      .upload(storagePath, await file.arrayBuffer(), {
-        contentType: file.type,
-        cacheControl: '31536000',
-        upsert: false,
-      });
-
-    if (uploadError) {
-      failed.push({ fileName: file.name, reason: uploadError.message });
-      continue;
-    }
-
-    const { data: publicUrl } = db.storage.from(DESIGN_BUCKET).getPublicUrl(storagePath);
-
     try {
-      const design = await insertDesign({
+      const buffer = await file.arrayBuffer();
+      const { error: uploadError } = await db.storage
+        .from(DESIGN_BUCKET)
+        .upload(storagePath, buffer, {
+          contentType: file.type,
+          cacheControl: '31536000',
+          upsert: false,
+        });
+
+      if (uploadError) {
+        failed.push({ fileName: file.name, reason: uploadError.message });
+        continue;
+      }
+
+      const { data: publicUrl } = db.storage.from(DESIGN_BUCKET).getPublicUrl(storagePath);
+
+      try {
+        const design = await insertDesign({
+          fileName: file.name,
+          imageUrl: publicUrl.publicUrl,
+          storagePath,
+        });
+        uploaded.push(design);
+      } catch (err) {
+        // Roll back the orphaned object so storage stays consistent.
+        try {
+          await db.storage.from(DESIGN_BUCKET).remove([storagePath]);
+        } catch {}
+        failed.push({ fileName: file.name, reason: err instanceof Error ? err.message : 'Database insert failed.' });
+      }
+    } catch (err: any) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const isUnreachable = isConnectionError(err);
+      failed.push({
         fileName: file.name,
-        imageUrl: publicUrl.publicUrl,
-        storagePath,
+        reason: isUnreachable
+          ? 'Cannot connect to Supabase storage. Your project may be paused in your Supabase dashboard.'
+          : msg || 'Upload failed.',
       });
-      uploaded.push(design);
-    } catch (err) {
-      // Roll back the orphaned object so storage stays consistent.
-      await db.storage.from(DESIGN_BUCKET).remove([storagePath]);
-      failed.push({ fileName: file.name, reason: err instanceof Error ? err.message : 'Database insert failed.' });
     }
   }
 
-  return NextResponse.json({ uploaded, failed }, { status: failed.length && !uploaded.length ? 500 : 200 });
+  const allFailed = failed.length > 0 && uploaded.length === 0;
+  return NextResponse.json(
+    {
+      uploaded,
+      failed,
+      error: allFailed ? failed[0]?.reason : undefined,
+      unreachable: allFailed && failed.some((f) => f.reason.includes('paused') || f.reason.includes('connect')),
+    },
+    { status: allFailed ? 502 : 200 }
+  );
 }
 
 export async function DELETE(request: Request) {

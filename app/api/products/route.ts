@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { isAdminRequest } from '@/lib/admin-auth';
-import { SetupRequiredError, deleteProductById, fetchProducts, upsertProduct } from '@/lib/catalog-server';
+import { SetupRequiredError, SupabaseUnreachableError, deleteProductById, fetchProducts, upsertProduct } from '@/lib/catalog-server';
 import { Product } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -11,10 +11,16 @@ export async function GET() {
     // null => Supabase not configured; the client falls back to seed data.
     return NextResponse.json({ products, source: products ? 'supabase' : 'local' });
   } catch (err) {
-    // A missing schema is a setup step, not a storefront outage - answer 200 so
+    // A missing schema or an unreachable database is not a storefront outage - answer 200 so
     // customers still see the seed catalogue.
-    if (err instanceof SetupRequiredError) {
-      return NextResponse.json({ products: null, source: 'local', setupRequired: true, error: err.message });
+    if (err instanceof SetupRequiredError || err instanceof SupabaseUnreachableError) {
+      return NextResponse.json({
+        products: null,
+        source: 'local',
+        setupRequired: err instanceof SetupRequiredError,
+        unreachable: err instanceof SupabaseUnreachableError,
+        error: err.message,
+      });
     }
     return NextResponse.json(
       { products: null, source: 'error', error: err instanceof Error ? err.message : 'Unknown error' },
@@ -36,9 +42,10 @@ export async function POST(request: Request) {
     const saved = await upsertProduct(product);
     return NextResponse.json({ product: saved });
   } catch (err) {
+    const status = err instanceof SupabaseUnreachableError ? 503 : 500;
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Could not save the product.' },
-      { status: 500 }
+      { status }
     );
   }
 }
